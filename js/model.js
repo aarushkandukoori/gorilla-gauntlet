@@ -87,9 +87,9 @@
     h.hp -= d; h.dmgTaken += d; sim.g.dmgDealt += d;
     if (h.hp <= 0) {
       h.hp = 0; h.state = 'down'; h.downAt = sim.t; sim.g.kos++;
-      ev('ko', h.name + ' is down (' + how + ')', h.id);
+      ev('ko', h.name + ' is down (' + how + ')', h.id, { how, dmg: Math.round(d) });
     } else {
-      ev(how === 'bitten' ? 'bite' : 'hit', h.name + ' ' + how + ' (-' + Math.round(d) + ')', h.id);
+      ev(how === 'bitten' ? 'bite' : 'hit', h.name + ' ' + how + ' (-' + Math.round(d) + ')', h.id, { how, dmg: Math.round(d) });
     }
   }
 
@@ -115,7 +115,7 @@
     if (sim.over) return;
     const dt = DT, f = sim.figure, G = sim.gorilla, g = sim.g, rng = sim.rng;
     sim.t += dt; sim.tick++;
-    const ev = sim.opts.quiet ? noop : function (kind, msg, who) { sim.events.push({ t: sim.t, kind, msg, who: who == null ? -1 : who }); };
+    const ev = sim.opts.quiet ? noop : function (kind, msg, who, extra) { sim.events.push(Object.assign({ t: sim.t, kind, msg, who: who == null ? -1 : who }, extra || {})); };
 
     // timers
     for (const h of sim.humans) {
@@ -182,7 +182,7 @@
               if (v.state !== 'down') { v.state = 'engaged'; v.stun = 1.5 + rng(); }
             }
             g.freeWindow = 1.5; g.throws++;
-            ev('throw', 'Gorilla explodes free, hurling ' + victims.length + (victims.length === 1 ? ' body' : ' bodies'), victims[0].id);
+            ev('throw', 'Gorilla explodes free, hurling ' + victims.length + (victims.length === 1 ? ' body' : ' bodies'), victims[0].id, { ids: victims.map(v => v.id) });
           } else if (rng() < 0.3) {
             const v = latched[(rng() * latched.length) | 0];
             g.attacks++;

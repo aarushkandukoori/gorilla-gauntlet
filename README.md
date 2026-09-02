@@ -17,8 +17,14 @@ python3 -m http.server 8765 --directory .
   and an editable 0–1 fight profile (striking, grappling, endurance, speed, toughness).
 - **Wikidata import** — search any person; height (P2048), mass (P2067) and occupations (P106/P641)
   are pulled live and mapped to an archetype (boxer → striker, bodybuilder → lifter, …).
-- **Animated arena** with play / pause / step / speed (0.5×–16×), live gorilla health & stamina,
-  restraint-vs-strength meter, pin timer, fight log, and a round history.
+- **Animated fight scene** — procedurally drawn, articulated humans and a silverback on a 3/4-view
+  jungle clearing. Every swing, bite, latch, throw and knockout is a simulation event: wind-ups,
+  knockback, ballistic throws, chest-beating break-frees, dust, blood decals, damage pop-ups,
+  camera shake, slow-motion finish, fighting-game HUD.
+- **Synthesized sound** (WebAudio, no assets): thuds, bites, whooshes, roars, bell. Toggle with the
+  button or `M`; preference is remembered.
+- Play / pause / step / speed (0.5×–16×), live gorilla health & stamina, restraint-vs-strength
+  meter, pin timer, fight log, and a round history.
 - **Auto-escalation** — "Keep adding a copy until they win" reruns with N+1 after every loss.
 - **Solve it** — runs 60 silent fights per crew size and reports the smallest crew that wins
   ≥50% and ≥90% of the time, with a win-rate chart and shareable text.
@@ -33,7 +39,9 @@ python3 -m http.server 8765 --directory .
 | `index.html`, `css/style.css` | Page and styling (dark theme, responsive to 375 px) |
 | `js/model.js` | Headless combat model — same code runs the arena, the solver, and Node calibration |
 | `js/roster.js` | Gorilla stats, figure roster, archetype table |
-| `js/sim.js` | Arena renderer, controls, result cards, solver UI |
+| `js/render.js` | Animated arena: figures, gorilla, particles, camera, HUD |
+| `js/audio.js` | Synthesized sound effects |
+| `js/sim.js` | Controls, run lifecycle, result cards, solver UI |
 | `js/wikidata.js` | Wikidata search/import + occupation → archetype mapping |
 | `js/ads.js` | Ad slot loader (placeholders until configured) |
 | `calibrate.js` | `node calibrate.js [trials] [id,id,...]` — prints N50/N90 for every figure |
@@ -84,7 +92,8 @@ Re-run with `node calibrate.js 50` after changing constants in `js/model.js`.
 ## Turning on ads
 
 1. Get an AdSense (or other network) account approved for your domain.
-2. In `js/ads.js` set `enabled: true`, your `client` id (`ca-pub-…`), and one slot id per
+2. In `js/ads.js` set `enabled: true` and your `client` id (`ca-pub-…`). With no slot ids this
+   runs **Auto ads** (Google picks placements). For fixed placements, also fill one slot id per
    placement (`leaderboard`, `sidebar`, `footer`) from Display ad units you create.
 3. Put the `ads.txt` line AdSense gives you at the site root.
 4. Until then every slot shows a labelled placeholder so the layout does not shift.

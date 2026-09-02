@@ -8,15 +8,16 @@
  * Also host an ads.txt at the site root — see README.
  */
 window.ADS_CONFIG = {
-  enabled: false,
+  enabled: false,                   // flip to true once `client` is filled in
   provider: 'adsense',
-  client: '',                       // e.g. 'ca-pub-1234567890123456'
+  client: '',                       // your AdSense publisher id, e.g. 'ca-pub-1234567890123456'
+  // Optional: Display ad unit slot ids. Leave empty to use AdSense Auto ads (client id only).
   slots: { leaderboard: '', sidebar: '', footer: '' },
 };
 
 (function () {
   const cfg = window.ADS_CONFIG;
-  const live = cfg.enabled && cfg.client && cfg.provider === 'adsense';
+  const live = cfg.enabled && /^ca-pub-\d{10,}$/.test(cfg.client || '') && cfg.provider === 'adsense';
   const els = document.querySelectorAll('.ad[data-ad]');
   if (!els.length) return;
   if (!live) {
@@ -27,9 +28,15 @@ window.ADS_CONFIG = {
   s.async = true; s.crossOrigin = 'anonymous';
   s.src = 'https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=' + encodeURIComponent(cfg.client);
   document.head.appendChild(s);
+  const anySlot = Object.values(cfg.slots || {}).some(Boolean);
+  if (!anySlot) {
+    // Auto ads: Google chooses placements; hide the reserved boxes so nothing sits empty.
+    els.forEach(el => { el.hidden = true; });
+    return;
+  }
   els.forEach(el => {
     const slot = cfg.slots[el.dataset.ad];
-    if (!slot) { el.classList.add('placeholder'); el.textContent = 'Advertisement'; return; }
+    if (!slot) { el.hidden = true; return; }
     const ins = document.createElement('ins');
     ins.className = 'adsbygoogle';
     ins.style.display = 'block';

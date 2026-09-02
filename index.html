@@ -88,6 +88,7 @@
         <button id="btn-play" class="btn btn-primary" title="Space">▶ Play</button>
         <button id="btn-step" class="btn" title="Advance half a second">Step</button>
         <button id="btn-reset" class="btn" title="Restart this round">↺ Reset</button>
+        <button id="btn-sound" class="btn" title="Toggle fight sounds (M)">🔊 Sound on</button>
       </div>
       <div class="control-group">
         <label class="inline">Speed
@@ -127,6 +128,7 @@
       <h2>How the model works</h2>
       <p>Each 0.1 s tick, the gorilla and every human in contact act. The gorilla swings or bites at one target and keeps mauling it until it drops. Humans either strike or try to latch on. Latched bodies add <b>restraint</b> (grip strength plus dead weight); when restraint exceeds the gorilla's <b>effective strength</b> it is pinned and must burn energy to break free — a fresh gorilla explodes out and hurls people, an exhausted one can't.</p>
       <p>Human strikes mostly bounce off dense bone and hide (88% of blunt damage negated), so the realistic path to victory is <b>numbers, mass, and endurance</b>: survive the fresh phase, run the gorilla out of stamina, rotate spent bodies out, then dogpile. The humans win when the gorilla is pinned and exhausted for 10 continuous seconds, or (rarely) beaten down outright. The gorilla wins when everyone is down or it is still standing after 10 minutes.</p>
+      <p>What you see is what the model computes: every swing, bite, latch, throw and knockout in the arena is an event from the simulation, not a canned animation. Slow-motion kicks in for the finish.</p>
       <p>Figure numbers are public (height, weight, documented lifts, fight records). The 0–1 fight profile is an editorial estimate you can edit. The gorilla's strength figure is the widely quoted ~815 kg estimate, which is uncertain — treat every result as a model output, not a fact. <b>Solve it</b> runs many silent fights per crew size and reports the smallest crew that wins at least half the time, and the smallest that wins 9 in 10.</p>
     </section>
   </section>
@@ -163,6 +165,8 @@
 <script src="js/model.js"></script>
 <script src="js/roster.js"></script>
 <script src="js/wikidata.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/render.js"></script>
 <script src="js/sim.js"></script>
 </body>
 </html>

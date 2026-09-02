@@ -11,7 +11,7 @@
 
   const state = {
     figure: null, n: 1, sim: null, playing: false, speed: 1, autoEscalate: true, strategy: 'swarm',
-    view: new Map(), slots: new Array(M.CONTACT_SLOTS).fill(-1), fx: [], lastEvent: 0, acc: 0, lastTs: 0,
+    lastEvent: 0, acc: 0, lastTs: 0,
     pendingEscalate: false, escalateTimer: 0, rounds: [], roundNo: 0, solving: false, customFigures: new Map(),
   };
 
@@ -23,8 +23,9 @@
     barGhp: $('#bar-ghp'), valGhp: $('#val-ghp'), barGstam: $('#bar-gstam'), valGstam: $('#val-gstam'), barPin: $('#bar-pin'), valPin: $('#val-pin'),
     valRestraint: $('#val-restraint'), valStanding: $('#val-standing'), valAttacks: $('#val-attacks'),
     wdQuery: $('#wd-query'), wdGo: $('#wd-go'), wdResults: $('#wd-results'), wdHint: $('#wd-hint'), customForm: $('#custom-form'), customDetails: $('#custom-details'),
+    sound: $('#btn-sound'),
   };
-  const ctx = el.canvas.getContext('2d');
+  const renderer = window.GorillaRenderer.create(el.canvas);
 
   // ---------- helpers ----------
   const fmtT = t => t.toFixed(1) + ' s';
@@ -181,8 +182,10 @@
     opts = opts || {};
     setN(n);
     state.sim = M.createSim(state.figure, state.n, G, { strategy: state.strategy });
-    state.view.clear(); state.slots.fill(-1); state.fx = []; state.lastEvent = 0; state.acc = 0; state.pendingEscalate = false;
+    state.lastEvent = 0; state.acc = 0; state.pendingEscalate = false;
     state.roundNo++;
+    renderer.reset(state.sim, state.figure);
+    if (window.GAudio && window.GAudio.ready && opts.autoplay) window.GAudio.play('bell', { vol: 0.6 });
     el.log.innerHTML = '';
     el.banner.hidden = true; el.banner.className = 'banner';
     addLog({ t: 0, kind: 'info', msg: `Round ${state.roundNo}: ${state.n} × ${state.figure.name} step into the arena` });
@@ -219,7 +222,7 @@
     } else {
       el.banner.className = 'banner lose';
       if (state.autoEscalate && r.n < 200) {
-        state.pendingEscalate = true; state.escalateTimer = 1.8;
+        state.pendingEscalate = true; state.escalateTimer = 2.2;
         el.banner.innerHTML = `<div><b>Gorilla wins</b> — ${escapeHtml(howText(r))} in ${r.t.toFixed(0)} s.<div class="sub">Adding another copy… next up ${r.n + 1} × ${escapeHtml(f.name)}</div></div>`;
       } else {
         el.banner.innerHTML = `<div><b>Gorilla wins</b> — ${escapeHtml(howText(r))} in ${r.t.toFixed(0)} s.<div class="sub">Add a copy and try again.</div></div><button class="btn" id="banner-plus">+1 copy</button>`;
@@ -315,160 +318,14 @@
     for (; state.lastEvent < sim.events.length; state.lastEvent++) {
       const ev = sim.events[state.lastEvent];
       if (ev.msg) addLog(ev);
-      const v = ev.who >= 0 ? state.view.get(ev.who) : null;
-      const px = v ? v.x : CX, py = v ? v.y : CY;
-      switch (ev.kind) {
-        case 'hit': case 'bite': state.fx.push({ type: 'impact', x: px, y: py, ttl: .3, ttl0: .3, color: ev.kind === 'bite' ? '#f59e0b' : '#f87171' }); break;
-        case 'ko': state.fx.push({ type: 'impact', x: px, y: py, ttl: .45, ttl0: .45, color: '#f87171' }, { type: 'text', x: px, y: py - 18, ttl: 1.1, ttl0: 1.1, text: 'DOWN', color: '#f87171' }); break;
-        case 'latch': state.fx.push({ type: 'ring', x: px, y: py, ttl: .4, ttl0: .4, color: '#60a5fa' }); break;
-        case 'strike': if (v) { const a = Math.atan2(py - CY, px - CX); state.fx.push({ type: 'spark', x: CX + Math.cos(a) * (GR + 4), y: CY + Math.sin(a) * (GR + 4), ttl: .18, ttl0: .18, color: '#e7e9ee' }); } break;
-        case 'vital': state.fx.push({ type: 'text', x: CX, y: CY - GR - 14, ttl: 1.2, ttl0: 1.2, text: 'EYES!', color: '#34d399' }); break;
-        case 'pin': state.fx.push({ type: 'text', x: CX, y: CY - GR - 14, ttl: 1.2, ttl0: 1.2, text: 'PINNED', color: '#34d399' }); break;
-        case 'throw': state.fx.push({ type: 'text', x: CX, y: CY - GR - 14, ttl: 1.2, ttl0: 1.2, text: 'BREAKS FREE', color: '#f59e0b' }, { type: 'ring', x: CX, y: CY, ttl: .5, ttl0: .5, color: '#f59e0b', big: true }); break;
-      }
+      renderer.event(ev, sim);
     }
   }
 
-  // ---------- view positions ----------
-  function ensureView(h) {
-    let v = state.view.get(h.id);
-    if (!v) {
-      const a = TAU * ((h.id * 0.618033) % 1);
-      v = { x: CX + Math.cos(a) * 420, y: CY + Math.sin(a) * 280, slot: -1, downAngle: null };
-      state.view.set(h.id, v);
-    }
-    return v;
-  }
-  function updateView(dt) {
-    const sim = state.sim; if (!sim) return;
-    const f = state.figure, hr = humanRadius(f);
-    // slot bookkeeping
-    for (let i = 0; i < state.slots.length; i++) {
-      const id = state.slots[i];
-      if (id >= 0) { const h = sim.humans[id]; if (h.state !== 'engaged' && h.state !== 'latched') { state.slots[i] = -1; const v = state.view.get(id); if (v) { if (h.state === 'down') v.downAngle = slotAngle(i); v.slot = -1; } } }
-    }
-    const waiting = [];
-    for (const h of sim.humans) {
-      const v = ensureView(h);
-      if ((h.state === 'engaged' || h.state === 'latched') && v.slot < 0) {
-        const free = state.slots.indexOf(-1);
-        if (free >= 0) { state.slots[free] = h.id; v.slot = free; }
-      }
-      if (h.state === 'waiting') waiting.push(h);
-    }
-    const k = Math.min(1, dt * 6);
-    let wi = 0;
-    for (const h of sim.humans) {
-      const v = state.view.get(h.id);
-      let tx, ty;
-      if (v.slot >= 0) {
-        const a = slotAngle(v.slot);
-        const rr = h.state === 'latched' ? GR + hr - 6 : GR + hr + 26;
-        tx = CX + Math.cos(a) * rr; ty = CY + Math.sin(a) * rr;
-      } else if (h.state === 'down') {
-        const a = v.downAngle == null ? TAU * ((h.id * 0.618033) % 1) : v.downAngle;
-        const rr = GR + hr + 78 + (h.id % 3) * 26;
-        tx = CX + Math.cos(a) * rr * 1.15; ty = CY + Math.sin(a) * rr;
-      } else {
-        // waiting: ellipse rings, 18 per ring
-        const ring = Math.floor(wi / 18), idx = wi % 18, per = Math.min(18, waiting.length - ring * 18);
-        const a = -Math.PI / 2 + TAU * (idx / per) + ring * 0.17;
-        tx = CX + Math.cos(a) * (330 + ring * 42); ty = CY + Math.sin(a) * (235 + ring * 30);
-        wi++;
-      }
-      v.x += (tx - v.x) * k; v.y += (ty - v.y) * k;
-    }
-    for (const fx of state.fx) { fx.ttl -= dt; if (fx.type === 'text') fx.y -= 22 * dt; }
-    state.fx = state.fx.filter(x => x.ttl > 0);
-  }
-  function slotAngle(i) { return -Math.PI / 2 + TAU * (i / M.CONTACT_SLOTS); }
-
-  // ---------- drawing ----------
   function resizeCanvas() {
     const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const cw = el.canvas.clientWidth || W;
-    el.canvas.width = Math.round(cw * dpr); el.canvas.height = Math.round(cw * (H / W) * dpr);
-  }
-  function draw() {
-    const c = ctx, sim = state.sim;
-    const sx = el.canvas.width / W;
-    c.setTransform(sx, 0, 0, sx, 0, 0);
-    // ground
-    const grd = c.createRadialGradient(CX, CY, 40, CX, CY, 560);
-    grd.addColorStop(0, '#1b2a20'); grd.addColorStop(0.55, '#111a15'); grd.addColorStop(1, '#0b0d10');
-    c.fillStyle = grd; c.fillRect(0, 0, W, H);
-    c.strokeStyle = 'rgba(255,255,255,0.05)'; c.lineWidth = 2;
-    for (const r of [120, 250]) { c.beginPath(); c.ellipse(CX, CY, r * 1.3, r, 0, 0, TAU); c.stroke(); }
-    if (!sim) return;
-    const f = state.figure, hr = humanRadius(f), g = sim.g;
-
-    // draw order: down → waiting → engaged → gorilla → latched
-    const order = { down: 0, waiting: 1, engaged: 2, latched: 4 };
-    const hs = sim.humans.slice().sort((a, b) => order[a.state] - order[b.state]);
-    let gorillaDrawn = false;
-    for (const h of hs) {
-      if (!gorillaDrawn && order[h.state] >= 4) { drawGorilla(c, g); gorillaDrawn = true; }
-      drawHuman(c, h, state.view.get(h.id), hr, f);
-    }
-    if (!gorillaDrawn) drawGorilla(c, g);
-
-    // fx
-    for (const fx of state.fx) {
-      const p = fx.ttl / fx.ttl0;
-      c.globalAlpha = Math.max(0, p);
-      if (fx.type === 'impact') { c.strokeStyle = fx.color; c.lineWidth = 3; c.beginPath(); c.arc(fx.x, fx.y, 8 + (1 - p) * 26, 0, TAU); c.stroke(); }
-      else if (fx.type === 'ring') { c.strokeStyle = fx.color; c.lineWidth = 2; c.beginPath(); c.arc(fx.x, fx.y, (fx.big ? GR + 10 : 14) + (1 - p) * 30, 0, TAU); c.stroke(); }
-      else if (fx.type === 'spark') { c.fillStyle = fx.color; c.beginPath(); c.arc(fx.x, fx.y, 3 + (1 - p) * 5, 0, TAU); c.fill(); }
-      else if (fx.type === 'text') { c.fillStyle = fx.color; c.font = 'bold 18px system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(fx.text, fx.x, fx.y); }
-      c.globalAlpha = 1;
-    }
-    // HUD corner
-    c.fillStyle = 'rgba(231,233,238,0.75)'; c.font = '14px system-ui, sans-serif'; c.textAlign = 'left'; c.textBaseline = 'top';
-    const standing = sim.humans.filter(h => h.state !== 'down').length;
-    c.fillText(`${standing}/${sim.n} standing · ${sim.humans.filter(h => h.state === 'latched').length} latched · ${g.pinned ? 'PINNED' : g.hampered > 0 ? 'held ' + Math.round(g.hampered * 100) + '%' : 'free'}`, 14, 12);
-    c.textAlign = 'right';
-    c.fillText(`${state.speed}×`, W - 14, 12);
-  }
-  function drawGorilla(c, g) {
-    const sf = g.stam / 100, hf = g.hp / g.hpMax;
-    // shadow + body
-    c.fillStyle = 'rgba(0,0,0,0.45)'; c.beginPath(); c.ellipse(CX, CY + GR * 0.85, GR * 1.25, GR * 0.45, 0, 0, TAU); c.fill();
-    if (g.pinned) { c.strokeStyle = '#34d399'; c.lineWidth = 4; c.setLineDash([8, 6]); c.beginPath(); c.arc(CX, CY, GR + 10, 0, TAU); c.stroke(); c.setLineDash([]); }
-    c.fillStyle = g.dazed > 0 ? '#5a4a3a' : '#3b2f2a'; c.beginPath(); c.arc(CX, CY, GR, 0, TAU); c.fill();
-    c.strokeStyle = '#f59e0b'; c.lineWidth = 2.5; c.stroke();
-    c.font = `${Math.round(GR * 1.35)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`; c.textAlign = 'center'; c.textBaseline = 'middle';
-    c.fillText('🦍', CX, CY + 3);
-    if (g.dazed > 0) { c.fillStyle = '#fbbf24'; c.font = '16px system-ui'; c.fillText('✦ ✦ ✦', CX, CY - GR - 8); }
-    // bars
-    bar(c, CX - 50, CY + GR + 12, 100, 7, hf, '#f87171');
-    bar(c, CX - 50, CY + GR + 22, 100, 7, sf, '#f59e0b');
-    if (g.pinTimer > 0) bar(c, CX - 50, CY + GR + 32, 100, 7, Math.min(1, g.pinTimer / M.PIN_HOLD_SECONDS), '#34d399');
-    c.fillStyle = 'rgba(231,233,238,0.85)'; c.font = '12px system-ui, sans-serif'; c.textBaseline = 'top'; c.textAlign = 'center';
-    c.fillText('Silverback · ' + Math.round(g.eff) + ' str', CX, CY + GR + (g.pinTimer > 0 ? 42 : 32));
-  }
-  function drawHuman(c, h, v, hr, f) {
-    const down = h.state === 'down';
-    const r = down ? hr * 0.9 : hr;
-    c.fillStyle = 'rgba(0,0,0,0.35)'; c.beginPath(); c.ellipse(v.x, v.y + r * 0.8, r * 1.1, r * 0.4, 0, 0, TAU); c.fill();
-    let fill = '#34d399', stroke = '#0e2a1c';
-    if (h.state === 'latched') { fill = '#60a5fa'; stroke = '#10233f'; }
-    else if (h.state === 'waiting') { fill = '#1f6f52'; stroke = '#0e2a1c'; }
-    else if (down) { fill = '#3a3f47'; stroke = '#1a1d22'; }
-    if (h.stun > 0 && !down) fill = '#a7f3d0';
-    c.fillStyle = fill; c.beginPath(); c.arc(v.x, v.y, r, 0, TAU); c.fill();
-    c.strokeStyle = stroke; c.lineWidth = 2; c.stroke();
-    if (h.state === 'latched') { c.strokeStyle = 'rgba(96,165,250,0.6)'; c.lineWidth = 3; c.beginPath(); c.moveTo(v.x, v.y); const a = Math.atan2(CY - v.y, CX - v.x); c.lineTo(CX - Math.cos(a) * (GR - 4), CY - Math.sin(a) * (GR - 4)); c.stroke(); }
-    c.fillStyle = down ? '#7b8291' : '#06130c'; c.font = `bold ${Math.round(r * 0.95)}px system-ui, sans-serif`; c.textAlign = 'center'; c.textBaseline = 'middle';
-    c.fillText(down ? '✕' : initials(f.name), v.x, v.y + 1);
-    if (!down) {
-      bar(c, v.x - r, v.y - r - 9, r * 2, 4, h.hp / h.hpMax, '#f87171');
-      bar(c, v.x - r, v.y - r - 4, r * 2, 3, h.stam / 100, '#fbbf24');
-      if (state.sim.n > 1) { c.fillStyle = 'rgba(231,233,238,0.7)'; c.font = '10px system-ui'; c.textBaseline = 'top'; c.fillText('#' + (h.id + 1), v.x, v.y + r + 3); }
-    }
-  }
-  function bar(c, x, y, w, h, p, color) {
-    c.fillStyle = 'rgba(0,0,0,0.55)'; c.fillRect(x, y, w, h);
-    c.fillStyle = color; c.fillRect(x, y, Math.max(0, Math.min(1, p)) * w, h);
+    const cw = el.canvas.clientWidth || window.GorillaRenderer.W;
+    el.canvas.width = Math.round(cw * dpr); el.canvas.height = Math.round(cw * (window.GorillaRenderer.H / window.GorillaRenderer.W) * dpr);
   }
 
   // ---------- status panel ----------
@@ -490,24 +347,31 @@
   function advance(now) {
     const dt = Math.min(1.0, state.lastTs ? (now - state.lastTs) / 1000 : 0.016); state.lastTs = now;
     if (!state.sim) return;
+    let steps = 0;
     if (state.playing && !state.sim.over) {
-      state.acc += dt * state.speed;
-      let steps = 0;
+      state.acc += dt * state.speed * renderer.timeScale;
       while (state.acc >= M.DT && steps < 600 && !state.sim.over) { M.step(state.sim); state.acc -= M.DT; steps++; }
       if (steps >= 600) state.acc = 0;
       drainEvents();
       if (state.sim.over) onRunOver();
-    } else if (state.sim.over && state.pendingEscalate) {
+    } else if (state.sim.over && state.pendingEscalate && renderer.cine <= 0) {
       state.escalateTimer -= dt;
       if (state.escalateTimer <= 0) { state.pendingEscalate = false; startRun(state.n + 1, { autoplay: true }); }
     }
-    updateView(dt); updateStatus();
+    // after the fight ends let the scene keep animating (celebration / chest-beat) in real time
+    const dtSim = state.sim.over && !state.playing ? Math.min(dt, 0.1) : steps * M.DT;
+    renderer.update(dtSim, dt, state.sim, { speed: state.speed, roundNo: state.roundNo });
+    updateStatus();
   }
-  function frame() { draw(); requestAnimationFrame(frame); }
+  function frame() { if (state.sim) renderer.draw(state.sim, { speed: state.speed, roundNo: state.roundNo }); requestAnimationFrame(frame); }
   setInterval(() => advance(performance.now()), 33);
 
   // ---------- controls ----------
-  el.play.addEventListener('click', () => { if (state.sim && state.sim.over && !state.pendingEscalate) startRun(state.n, { autoplay: true }); else setPlaying(!state.playing); });
+  function ensureAudio() { if (window.GAudio && !window.GAudio.ready) window.GAudio.init(); }
+  el.play.addEventListener('click', () => { ensureAudio(); if (state.sim && state.sim.over && !state.pendingEscalate) startRun(state.n, { autoplay: true }); else setPlaying(!state.playing); });
+  function syncSoundBtn() { const m = window.GAudio ? window.GAudio.muted : true; el.sound.textContent = m ? '🔇 Sound off' : '🔊 Sound on'; el.sound.title = m ? 'Unmute fight sounds' : 'Mute fight sounds'; }
+  el.sound.addEventListener('click', () => { ensureAudio(); window.GAudio.setMuted(!window.GAudio.muted); syncSoundBtn(); if (!window.GAudio.muted) window.GAudio.play('punch'); });
+  syncSoundBtn();
   el.step.addEventListener('click', () => { setPlaying(false); if (state.sim && state.sim.over) startRun(state.n); stepSim(0.5); });
   el.reset.addEventListener('click', () => { const p = state.playing; startRun(state.n, { autoplay: p }); el.result.hidden = true; });
   el.speed.addEventListener('change', e => state.speed = Number(e.target.value));
@@ -519,7 +383,9 @@
   el.solve.addEventListener('click', solve);
   el.select.addEventListener('change', e => setFigure(figureById(e.target.value)));
   document.addEventListener('keydown', e => {
-    if (e.code === 'Space' && !/input|select|textarea|button/i.test(e.target.tagName)) { e.preventDefault(); el.play.click(); }
+    if (/input|select|textarea/i.test(e.target.tagName)) return;
+    if (e.code === 'Space') { e.preventDefault(); el.play.click(); }
+    else if (e.key === 'm' || e.key === 'M') el.sound.click();
   });
   window.addEventListener('resize', resizeCanvas);
 
@@ -531,5 +397,5 @@
   setFigure(startFigure, { keepN: false });
   if (params.get('n')) startRun(Number(params.get('n')));
   requestAnimationFrame(frame);
-  window.GorillaGauntlet = { state, startRun, setFigure, solve, figureById };
+  window.GorillaGauntlet = { state, startRun, setFigure, solve, figureById, renderer };
 })();
