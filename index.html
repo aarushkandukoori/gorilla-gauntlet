@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gorilla Gauntlet — how many of them does it take to beat a silverback?</title>
+<meta name="description" content="Pick any public figure — Ronnie Coleman, Mike Tyson, Brian Shaw, or import anyone from Wikidata — and watch a physics-informed simulation add copies until they can take down a silverback gorilla.">
+<meta property="og:title" content="Gorilla Gauntlet">
+<meta property="og:description" content="How many Ronnie Colemans does it take to beat a gorilla? Run the simulation.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦍</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="brand">
+    <span class="brand-emoji">🦍</span>
+    <div>
+      <h1>Gorilla Gauntlet</h1>
+      <p class="tagline">How many copies of <em id="tagline-name">Ronnie Coleman</em> does it take to beat a silverback?</p>
+    </div>
+  </div>
+  <nav class="header-links">
+    <a href="#how-it-works">How the model works</a>
+    <a href="https://github.com/aarushkandukoori/gorilla-gauntlet" id="repo-link" rel="noopener" target="_blank">Source</a>
+  </nav>
+</header>
+
+<div class="ad ad-leaderboard" data-ad="leaderboard" data-size="728x90"></div>
+
+<main class="layout">
+  <!-- ============ LEFT: figure picker ============ -->
+  <aside class="panel panel-figure">
+    <h2>Challenger</h2>
+    <label class="field">
+      <span>Pick a figure</span>
+      <select id="figure-select"></select>
+    </label>
+
+    <div class="figure-card" id="figure-card"></div>
+
+    <details class="custom" id="custom-details">
+      <summary>Custom figure / import from Wikidata</summary>
+      <div class="wd-search">
+        <input id="wd-query" type="search" placeholder="Search Wikidata — e.g. Ronnie Coleman" autocomplete="off">
+        <button id="wd-go" class="btn btn-small">Search</button>
+      </div>
+      <ul id="wd-results" class="wd-results"></ul>
+      <p class="hint" id="wd-hint">Wikidata gives height and weight when they exist; fill in the fight profile below.</p>
+
+      <form id="custom-form" class="custom-form" autocomplete="off">
+        <label class="field"><span>Name</span><input name="name" required maxlength="60" placeholder="Name"></label>
+        <div class="row2">
+          <label class="field"><span>Height (cm)</span><input name="heightCm" type="number" min="100" max="260" step="1" value="180"></label>
+          <label class="field"><span>Weight (kg)</span><input name="massKg" type="number" min="35" max="350" step="0.5" value="90"></label>
+        </div>
+        <label class="field"><span>Archetype (auto-fills the profile)</span><select name="archetype"></select></label>
+        <label class="field"><span>Strength index (kgf)<small> ≈ (best squat + deadlift + bench) ÷ 3</small></span><input name="strengthIndex" type="number" min="20" max="600" step="5" value="120"></label>
+        <div class="sliders">
+          <label><span>Striking</span><input name="striking" type="range" min="0" max="1" step="0.05" value="0.2"><b></b></label>
+          <label><span>Grappling</span><input name="grappling" type="range" min="0" max="1" step="0.05" value="0.2"><b></b></label>
+          <label><span>Endurance</span><input name="endurance" type="range" min="0" max="1" step="0.05" value="0.5"><b></b></label>
+          <label><span>Speed</span><input name="speed" type="range" min="0" max="1" step="0.05" value="0.5"><b></b></label>
+          <label><span>Toughness</span><input name="toughness" type="range" min="0" max="1" step="0.05" value="0.6"><b></b></label>
+        </div>
+        <button type="submit" class="btn btn-primary">Use this figure</button>
+      </form>
+    </details>
+
+    <div class="gorilla-card">
+      <h3>🦍 The opponent</h3>
+      <ul id="gorilla-facts"></ul>
+    </div>
+  </aside>
+
+  <!-- ============ CENTER: arena ============ -->
+  <section class="panel panel-arena">
+    <div class="arena-top">
+      <div class="matchup" id="matchup"><b id="matchup-n">1</b> × <span id="matchup-name">Ronnie Coleman</span> <span class="vs">vs</span> 1 × Silverback</div>
+      <div class="clock" id="clock">0.0 s</div>
+    </div>
+    <div class="arena-wrap">
+      <canvas id="arena" width="1000" height="620"></canvas>
+      <div class="banner" id="banner" hidden></div>
+    </div>
+
+    <div class="controls">
+      <div class="control-group">
+        <button id="btn-play" class="btn btn-primary" title="Space">▶ Play</button>
+        <button id="btn-step" class="btn" title="Advance half a second">Step</button>
+        <button id="btn-reset" class="btn" title="Restart this round">↺ Reset</button>
+      </div>
+      <div class="control-group">
+        <label class="inline">Speed
+          <select id="speed">
+            <option value="0.5">0.5×</option>
+            <option value="1" selected>1×</option>
+            <option value="2">2×</option>
+            <option value="4">4×</option>
+            <option value="8">8×</option>
+            <option value="16">16×</option>
+          </select>
+        </label>
+        <label class="inline">Copies
+          <span class="stepper">
+            <button id="n-minus" class="btn btn-small">−</button>
+            <input id="n-input" type="number" min="1" max="200" value="1">
+            <button id="n-plus" class="btn btn-small">+</button>
+          </span>
+        </label>
+        <label class="inline">Plan
+          <select id="strategy" title="How the humans fight">
+            <option value="swarm" selected>Swarm &amp; pin</option>
+            <option value="mixed">Mixed</option>
+            <option value="strike">Strike only</option>
+          </select>
+        </label>
+      </div>
+      <div class="control-group">
+        <label class="check"><input type="checkbox" id="auto-escalate" checked> Keep adding a copy until they win</label>
+        <button id="btn-solve" class="btn btn-accent" title="Run hundreds of silent fights to find the number">⚡ Solve it</button>
+      </div>
+    </div>
+
+    <div class="result-card" id="result-card" hidden></div>
+
+    <section class="explainer" id="how-it-works">
+      <h2>How the model works</h2>
+      <p>Each 0.1 s tick, the gorilla and every human in contact act. The gorilla swings or bites at one target and keeps mauling it until it drops. Humans either strike or try to latch on. Latched bodies add <b>restraint</b> (grip strength plus dead weight); when restraint exceeds the gorilla's <b>effective strength</b> it is pinned and must burn energy to break free — a fresh gorilla explodes out and hurls people, an exhausted one can't.</p>
+      <p>Human strikes mostly bounce off dense bone and hide (88% of blunt damage negated), so the realistic path to victory is <b>numbers, mass, and endurance</b>: survive the fresh phase, run the gorilla out of stamina, rotate spent bodies out, then dogpile. The humans win when the gorilla is pinned and exhausted for 10 continuous seconds, or (rarely) beaten down outright. The gorilla wins when everyone is down or it is still standing after 10 minutes.</p>
+      <p>Figure numbers are public (height, weight, documented lifts, fight records). The 0–1 fight profile is an editorial estimate you can edit. The gorilla's strength figure is the widely quoted ~815 kg estimate, which is uncertain — treat every result as a model output, not a fact. <b>Solve it</b> runs many silent fights per crew size and reports the smallest crew that wins at least half the time, and the smallest that wins 9 in 10.</p>
+    </section>
+  </section>
+
+  <!-- ============ RIGHT: status + log ============ -->
+  <aside class="panel panel-status">
+    <h2>Live</h2>
+    <div class="status-grid" id="status">
+      <div class="stat"><span>Gorilla health</span><div class="bar"><i id="bar-ghp" class="fill fill-red"></i></div><b id="val-ghp">100%</b></div>
+      <div class="stat"><span>Gorilla stamina</span><div class="bar"><i id="bar-gstam" class="fill fill-amber"></i></div><b id="val-gstam">100%</b></div>
+      <div class="stat"><span>Pin progress</span><div class="bar"><i id="bar-pin" class="fill fill-green"></i></div><b id="val-pin">0 / 10 s</b></div>
+      <div class="kv"><span>Restraint vs strength</span><b id="val-restraint">0 / 815</b></div>
+      <div class="kv"><span>Humans standing</span><b id="val-standing">1 / 1</b></div>
+      <div class="kv"><span>Gorilla attacks</span><b id="val-attacks">0</b></div>
+    </div>
+
+    <h2>Fight log</h2>
+    <ol id="log" class="log" reversed></ol>
+
+    <h2>Rounds</h2>
+    <ol id="rounds" class="rounds"></ol>
+
+    <div class="ad ad-rect" data-ad="sidebar" data-size="300x250"></div>
+  </aside>
+</main>
+
+<div class="ad ad-footer" data-ad="footer" data-size="responsive"></div>
+
+<footer class="site-footer">
+  <p>Gorilla Gauntlet is a simulation for entertainment. No gorillas or bodybuilders were harmed. Height/weight/lift figures come from public reporting and Wikidata; fight profiles are estimates. Wild gorillas are endangered — <a href="https://gorillafund.org" rel="noopener" target="_blank">support the Dian Fossey Gorilla Fund</a>.</p>
+</footer>
+
+<script src="js/ads.js"></script>
+<script src="js/model.js"></script>
+<script src="js/roster.js"></script>
+<script src="js/wikidata.js"></script>
+<script src="js/sim.js"></script>
+</body>
+</html>
