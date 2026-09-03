@@ -6,22 +6,12 @@
 (function (root) {
   'use strict';
   const W = 1000, H = 620, TAU = Math.PI * 2;
-  const PXM = 66;                       // pixels per metre at depth scale 1
-  const GX = 500, GY = 392;             // gorilla feet anchor
-  const RING_RX = 146, RING_RY = 64;    // engaged ring
-  const SLOTS = 10;
+  const PXM = 66;                       // pixels per metre of body height at depth scale 1
+  const PPM = 50;                       // ground-plane pixels per metre (x)
+  const YSQ = 0.44;                     // ground-plane foreshortening (y)
+  const OX = 500, OY = 405;             // screen position of the arena centre
   const GSCALE = 1.22;                  // gorilla drawn a touch larger than life for presence
-  // where latched humans cling to the gorilla (gorilla-relative, facing +1); z<0 = behind the body
-  const ATTACH = [
-    { x: 72, y: -58, z: 1 }, { x: -72, y: -58, z: 1 },
-    { x: 4, y: -122, z: -1 },
-    { x: 40, y: -24, z: 1 }, { x: -40, y: -24, z: 1 },
-    { x: -6, y: -142, z: -1 },
-    { x: 62, y: -104, z: 1 }, { x: -62, y: -104, z: 1 },
-    { x: 0, y: -54, z: -1 },
-    { x: 24, y: -156, z: -1 },
-  ];
-
+  const toScreen = (x, y) => ({ x: OX + x * PPM, y: OY + y * PPM * YSQ });
   const clamp = (x, a, b) => x < a ? a : x > b ? b : x;
   const lerp = (a, b, t) => a + (b - a) * t;
   const rad = d => d * Math.PI / 180;
@@ -91,30 +81,29 @@
     const decals = document.createElement('canvas'); decals.width = W; decals.height = H; const dctx = decals.getContext('2d');
     const A = root.GAudio;
     const R = {
-      timeScale: 1, figure: null, sim: null, humans: new Map(), gor: null, slots: new Array(SLOTS).fill(-1),
+      timeScale: 1, figure: null, sim: null, humans: new Map(), gor: null,
       particles: [], texts: [], cam: { zoom: 1, cx: 500, cy: 330, tz: 1, tcx: 500, tcy: 330, shake: 0, shx: 0, shy: 0 },
       cine: 0, cineKind: null, simClock: 0, realClock: 0, speed: 1, roundNo: 0, banner: null,
     };
     const snd = (name, opts) => { if (A && A.ready) { if (R.speed > 4 && Math.random() > 4 / R.speed) return; A.play(name, opts); } };
 
     function makeHuman(h, f) {
-      const a = TAU * hash(h.id + 1);
       const bulk = Math.pow(clamp((f.massKg / (f.heightM * f.heightM)) / 24, 0.85, 2.05), 0.62);
+      const p = toScreen(h.x, h.y);
       return {
-        id: h.id, x: GX + Math.cos(a) * 480, y: GY + Math.sin(a) * 235, tx: GX, ty: GY, face: 1, mode: 'walk',
+        id: h.id, x: p.x, y: p.y, z: 0, face: 1, mode: 'idle',
         pose: Object.assign({}, POSES.idle, { aF: POSES.idle.aF.slice(), aB: POSES.idle.aB.slice(), lF: POSES.idle.lF.slice(), lB: POSES.idle.lB.slice() }),
-        slot: -1, attach: -1, z: 0, vx: 0, vy: 0, vz: 0, spin: 0, rot: 0, kx: 0, ky: 0, dx: 0,
-        down: false, hurtT: 0, punchT: 0, grabT: 0, dodgeT: 0, riseT: 0, lieT: 0, walkPhase: hash(h.id * 3) * TAU, celebrate: false, wasLatched: false,
+        rot: 0, spin: 0, kx: 0, ky: 0, dx: 0, down: false, wasFloored: false, wasAir: false,
+        hurtT: 0, punchT: 0, grabT: 0, dodgeT: 0, riseT: 0, walkPhase: hash(h.id * 3) * TAU, celebrate: false,
         seed: hash(h.id * 7 + 3), h: f.heightM * PXM, bulk, hp: 1,
       };
     }
     function makeGorilla() {
-      return { x: GX, y: GY, face: -1, armF: 22, armB: 22, elbF: 10, elbB: 10, rise: 0, prone: 0, low: 0, lean: 0, mouth: 0, headDx: 0, headDy: 0, lunge: 0, lungeDir: 0,
-        swingT: -1, biteT: -1, beatT: -1, dazedT: 0, windup: 0, heave: 0, dead: 0, target: -1 };
+      return { x: OX, y: OY, face: -1, armF: 22, armB: 22, elbF: 10, elbB: 10, rise: 0, prone: 0, low: 0, lean: 0, mouth: 0, headDx: 0, headDy: 0, lunge: 0, lungeDir: 0,
+        swingT: -1, biteT: -1, beatT: -1, dazedT: 0, windup: 0, heave: 0, dead: 0, target: -1, walkPhase: 0, moving: 0, victory: false };
     }
-
     R.reset = function (sim, figure) {
-      R.sim = sim; R.figure = figure; R.humans.clear(); R.slots.fill(-1); R.particles = []; R.texts = []; R.cine = 0; R.timeScale = 1; R.banner = null;
+      R.sim = sim; R.figure = figure; R.humans.clear(); R.particles = []; R.texts = []; R.cine = 0; R.timeScale = 1; R.banner = null;
       for (const h of sim.humans) R.humans.set(h.id, makeHuman(h, figure));
       R.gor = makeGorilla();
       dctx.clearRect(0, 0, W, H);
@@ -122,20 +111,7 @@
     };
 
     // ---- geometry helpers ----
-    const slotAngle = i => -Math.PI / 2 + TAU * (i / SLOTS) + 0.31;
-    function slotPos(i) { const a = slotAngle(i); return { x: GX + Math.cos(a) * RING_RX, y: GY + Math.sin(a) * RING_RY }; }
-    function attachPos(i) {
-      const g = R.gor, p = ATTACH[i % ATTACH.length], s = depthScale(GY) * GSCALE;
-      let ax = p.x, ay = p.y;
-      // fold toward the ground as the gorilla goes prone
-      ay = lerp(ay, ay * 0.25 - 10, g.prone); ax = lerp(ax, ax * 1.3, g.prone);
-      return { x: g.x + g.lungeDir * g.lunge + ax * g.face * s, y: g.y + ay * s, z: p.z };
-    }
-    function reservePos(rank, total) {
-      const ring = Math.floor(rank / 16), idx = rank % 16, per = Math.min(16, total - ring * 16);
-      const a = -Math.PI / 2 + TAU * ((idx + 0.5) / per) + ring * 0.2;
-      return { x: GX + Math.cos(a) * (350 + ring * 40), y: GY + 6 + Math.sin(a) * (168 + ring * 22) };
-    }
+    function gorillaScreen(mg) { return toScreen(mg.x, mg.y); }
     function shakeCam(n) { R.cam.shake = Math.max(R.cam.shake, n); }
     function text(x, y, txt, color, size) { R.texts.push({ x, y, txt, color, size: size || 16, life: 1.1, life0: 1.1 }); }
     function dust(x, y, n, spread) { for (let i = 0; i < n; i++) { const a = Math.random() * TAU, sp = (0.3 + Math.random()) * (spread || 60); R.particles.push({ type: 'dust', x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp * 0.4 - 25, life: 0.5 + Math.random() * 0.4, life0: 0.9, size: 5 + Math.random() * 9 }); } }
@@ -150,19 +126,20 @@
         case 'hit': if (v) { gorAttack('swing', v); hurtHuman(v, ev.dmg, false); } break;
         case 'bite': if (v) { gorAttack('bite', v); hurtHuman(v, ev.dmg, true); } break;
         case 'ko': if (v) { if (ev.how === 'bitten' || ev.how === 'maimed') gorAttack('bite', v); else if (ev.how === 'struck') gorAttack('swing', v); knockout(v, ev); } break;
-        case 'miss': if (v) { gorAttack('swing', v); v.dodgeT = 0.4; v.dx = 0; snd('whoosh'); snd('dodge', { vol: 0.5 }); } break;
-        case 'latch': if (v) { v.grabT = 0.35; assignAttach(v); snd('grab'); dust(v.x, v.y, 4, 40); } break;
+        case 'miss': if (v) { gorAttack('swing', v); v.dodgeT = 0.4; snd('whoosh'); snd('dodge', { vol: 0.5 }); } break;
+        case 'latch': if (v) { v.grabT = 0.35; snd('grab'); dust(v.x, v.y, 4, 40); } break;
         case 'strike': if (v) { v.punchT = 0.28; const a = Math.atan2(v.y - g.y, v.x - g.x); spark(g.x + Math.cos(a) * 46, g.y - 95 + Math.sin(a) * 20); snd('punch', { vol: 0.6 }); } break;
         case 'vital': if (v) { v.punchT = 0.3; g.dazedT = 0.9; text(g.x, g.y - 190, 'EYES!', '#34d399', 22); snd('punch'); snd('crunch', { vol: 0.5 }); shakeCam(4); } break;
         case 'pin': text(g.x, g.y - 190, 'PINNED', '#34d399', 26); dust(g.x, g.y, 18, 120); shakeCam(7); snd('thud'); snd('land'); break;
-        case 'throw': { g.beatT = 0; g.rise = Math.max(g.rise, 0.2); const ids = ev.ids || (v ? [v.id] : []); ids.forEach((id, i) => throwHuman(R.humans.get(id), i)); snd('roar'); shakeCam(12); dust(g.x, g.y, 26, 160); break; }
+        case 'throw': { g.beatT = 0; g.rise = Math.max(g.rise, 0.2); const ids = ev.ids || (v ? [v.id] : []); ids.forEach(id => { const u = R.humans.get(id); if (u) { u.spin = (Math.random() < 0.5 ? -1 : 1) * (5 + Math.random() * 6); u.rot = 0; dust(u.x, u.y, 6, 60); } }); snd('roar'); shakeCam(12); dust(g.x, g.y, 26, 160); break; }
+        case 'land': if (v) { dust(v.x, v.y, 8, 80); snd('land', { vol: 0.6 }); shakeCam(2); } break;
         case 'win': cinematic('win'); break;
         case 'lose': cinematic('lose'); break;
       }
     };
     function gorAttack(kind, v) {
       const g = R.gor;
-      if (v) { g.face = v.x < g.x ? -1 : 1; g.target = v.id; g.lungeDir = g.face; g.lunge = (kind === 'bite' ? 34 : 24) * (v.mode === 'latched' ? 0.5 : 1); }
+      if (v) { g.face = v.x < g.x ? -1 : 1; g.target = v.id; g.lungeDir = g.face; g.lunge = kind === 'bite' ? 18 : 12; }
       if (kind === 'swing') { g.swingT = 0; g.windup = 0; snd('whoosh', { vol: 0.7 }); }
       else { g.biteT = 0; g.mouth = 1; }
     }
@@ -170,39 +147,21 @@
       const g = R.gor;
       v.hurtT = 0.38;
       const a = Math.atan2(v.y - g.y, v.x - g.x);
-      const kb = bite ? 14 : 34;
-      v.kx = Math.cos(a) * kb; v.ky = Math.sin(a) * kb * 0.5;
       const s = depthScale(v.y);
-      spark(v.x + (Math.random() - 0.5) * 10, v.y - v.h * s * 0.7);
+      spark(v.x + (Math.random() - 0.5) * 10, v.y - v.z - v.h * s * 0.7);
       dust(v.x, v.y, 5, 70);
       if (bite) { blood(v.x, v.y - v.h * s * 0.5, 9, a); snd('crunch'); } else { if (dmg > 40) blood(v.x, v.y - v.h * s * 0.6, 4, a); snd('thud'); }
-      if (dmg) text(v.x, v.y - v.h * s - 10, '-' + dmg, bite ? '#f59e0b' : '#f87171', 15);
+      if (dmg) text(v.x, v.y - v.z - v.h * s - 10, '-' + dmg, bite ? '#f59e0b' : '#f87171', 15);
       shakeCam(bite ? 5 : 3.5);
     }
     function knockout(v, ev) {
       const g = R.gor, s = depthScale(v.y);
-      if (v.attach >= 0) { const p = attachPos(v.attach); v.x = p.x + (p.z < 0 ? -g.face * 40 : g.face * 40); v.y = p.y + 40 + Math.random() * 20; v.z = 60; v.vz = -30; v.vx = g.face * 90; v.vy = 30; releaseAttach(v); }
-      v.down = true; v.mode = 'falling'; v.hurtT = 0.3; v.celebrate = false;
+      v.down = true; v.hurtT = 0.3; v.celebrate = false;
       const a = Math.atan2(v.y - g.y, v.x - g.x);
-      v.kx = Math.cos(a) * 44; v.ky = Math.sin(a) * 22;
       blood(v.x, v.y - v.h * s * 0.55, ev && ev.how === 'maimed' ? 22 : 10, a);
       decal(v.x + (Math.random() - 0.5) * 20, v.y + 4, 22 + Math.random() * 14, 7 + Math.random() * 4, 'rgba(120,20,20,0.55)');
-      text(v.x, v.y - v.h * s - 14, ev && ev.how === 'maimed' ? 'MAIMED' : 'DOWN', '#f87171', 20);
+      text(v.x, v.y - v.z - v.h * s - 14, ev && ev.how === 'maimed' ? 'MAIMED' : 'DOWN', '#f87171', 20);
       snd('ko'); shakeCam(6);
-      releaseSlot(v);
-    }
-    function throwHuman(v, i) {
-      if (!v) return;
-      const g = R.gor;
-      const from = v.attach >= 0 ? attachPos(v.attach) : { x: v.x, y: v.y };
-      releaseAttach(v); releaseSlot(v);
-      const a = Math.atan2(from.y - g.y, from.x - g.x) + (Math.random() - 0.5) * 0.9 + i * 0.7;
-      const dist = 190 + Math.random() * 110, T = 0.75;
-      v.x = from.x; v.y = from.y + 20; v.z = 70;
-      v.vx = Math.cos(a) * dist / T; v.vy = Math.sin(a) * dist * 0.5 / T; v.vz = -(v.z / T) - 0.5 * 700 * T; // ballistic to ground
-      v.spin = (Math.random() < 0.5 ? -1 : 1) * (5 + Math.random() * 6);
-      v.mode = 'thrown'; v.lieT = 0;
-      dust(from.x, from.y, 6, 60);
     }
     function cinematic(kind) {
       R.cine = 2.4; R.cineKind = kind; R.timeScale = 0.16;
@@ -210,12 +169,6 @@
       if (kind === 'win') { for (const v of R.humans.values()) if (!v.down) v.celebrate = true; snd('bell'); setTimeout(() => snd('cheer'), 300); R.gor.dead = 1; }
       else { R.gor.beatT = 0; R.gor.victory = true; snd('roar'); snd('bell'); }
     }
-
-    // ---- slot / attach bookkeeping ----
-    function releaseSlot(v) { if (v.slot >= 0) { R.slots[v.slot] = -1; v.slot = -1; } }
-    function assignSlot(v) { if (v.slot >= 0) return; let best = -1, bd = 1e9; for (let i = 0; i < SLOTS; i++) if (R.slots[i] < 0) { const p = slotPos(i), d = (p.x - v.x) ** 2 + (p.y - v.y) ** 2; if (d < bd) { bd = d; best = i; } } if (best >= 0) { R.slots[best] = v.id; v.slot = best; } }
-    function releaseAttach(v) { v.attach = -1; }
-    function assignAttach(v) { if (v.attach >= 0) return; const used = new Set(); for (const o of R.humans.values()) if (o.attach >= 0) used.add(o.attach); for (let i = 0; i < ATTACH.length; i++) if (!used.has(i)) { v.attach = i; return; } v.attach = (v.id % ATTACH.length); }
 
     // ---- per-frame update ----
     R.update = function (dtSim, dtReal, sim, info) {
@@ -227,8 +180,11 @@
       const k = 1 - Math.exp(-dt * 14), kf = 1 - Math.exp(-dt * 30);
 
       // -------- gorilla --------
-      const modelTarget = mg.target >= 0 ? R.humans.get(mg.target) : null;
-      if (modelTarget && g.swingT < 0 && g.biteT < 0 && g.beatT < 0 && !mg.pinned) g.face = lerp(g.face, modelTarget.x < g.x ? -1 : 1, kf) ;
+      const gp = gorillaScreen(mg); g.x = gp.x; g.y = gp.y;
+      const gspeed = Math.hypot(mg.vx, mg.vy);
+      g.moving = lerp(g.moving, gspeed > 0.4 ? clamp(gspeed / 6, 0.3, 1) : 0, k);
+      g.walkPhase += gspeed * dt * 2.2;
+      if (g.swingT < 0 && g.biteT < 0 && g.beatT < 0 && !mg.pinned) { const fx = Math.cos(mg.face); if (Math.abs(fx) > 0.15) g.face = fx < 0 ? -1 : 1; }
       g.face = g.face < 0 ? -1 : 1;
       const stam = mg.stam / 100;
       const wantProne = mg.pinned || g.dead ? 1 : 0;
@@ -238,11 +194,11 @@
       g.heave = 0.5 + 0.5 * Math.sin(R.simClock * (2 + 8 * (1 - stam)));
       if (g.dazedT > 0) g.dazedT -= dt;
       g.lunge = lerp(g.lunge, 0, 1 - Math.exp(-dt * 9));
-      // windup anticipation from the model's cooldown
-      const canAttack = !mg.pinned && g.dazedT <= 0 && g.swingT < 0 && g.biteT < 0 && g.beatT < 0 && mg.cd > 0 && mg.cd < 0.3;
-      g.windup = canAttack ? 1 - mg.cd / 0.3 : lerp(g.windup, 0, kf);
+      // wind-up anticipation straight from the environment
+      g.windup = mg.windup >= 0 && mg.windKind === 'swing' ? clamp(1 - mg.windup / 0.25, 0, 1) : lerp(g.windup, 0, kf);
       let armF = 22, armB = 22, elbF = 12, elbB = 12, rise = 0, mouth = stam < 0.3 ? 0.35 + 0.25 * g.heave : 0, headDx = 0, headDy = 0, lean = 0;
-      if (g.windup > 0) { armF = lerp(22, -95, g.windup); elbF = lerp(12, 40, g.windup); lean = -6 * g.windup; }
+      if (g.moving > 0.05) { const ph = Math.sin(g.walkPhase); armF = 22 + 26 * ph * g.moving; armB = 22 - 26 * ph * g.moving; lean = 6 * g.moving; }
+      if (g.windup > 0) { armF = lerp(armF, -95, g.windup); elbF = lerp(12, 40, g.windup); lean = -6 * g.windup; }
       if (g.swingT >= 0) { g.swingT += dt; const t = g.swingT; if (t < 0.11) { armF = lerp(-95, 135, t / 0.11); elbF = 25; lean = 10; } else if (t < 0.5) { armF = lerp(135, 22, (t - 0.11) / 0.39); elbF = 14; lean = lerp(10, 0, (t - 0.11) / 0.39); } else g.swingT = -1; }
       if (g.biteT >= 0) { g.biteT += dt; const t = g.biteT; if (t < 0.45) { const p = t < 0.15 ? t / 0.15 : 1 - (t - 0.15) / 0.3; headDx = 34 * p; headDy = 18 * p; mouth = 1; lean = 12 * p; armF = lerp(22, 60, p); armB = lerp(22, 60, p); elbF = elbB = 30; } else g.biteT = -1; }
       if (g.beatT >= 0) { g.beatT += dt; const t = g.beatT; if (t < 1.25) { rise = t < 0.18 ? t / 0.18 : t > 1.05 ? 1 - (t - 1.05) / 0.2 : 1; const ph = Math.sin(t * 34); armF = 105 + 25 * ph; armB = 105 - 25 * ph; elbF = 125; elbB = 125; mouth = 1; headDy = -8; if (g.victory && t > 1.2) g.beatT = 0.5; } else g.beatT = -1; }
@@ -251,52 +207,32 @@
       g.armB = lerp(g.armB, armB, kf); g.elbF = lerp(g.elbF, elbF, kf); g.elbB = lerp(g.elbB, elbB, kf);
       g.rise = lerp(g.rise, rise, 1 - Math.exp(-dt * 12)); g.mouth = lerp(g.mouth, mouth, kf); g.headDx = lerp(g.headDx, headDx, kf); g.headDy = lerp(g.headDy, headDy, kf); g.lean = lerp(g.lean, lean, kf);
 
-      // -------- humans --------
-      const waiting = sim.humans.filter(h => h.state === 'waiting');
-      const wRank = new Map(); waiting.forEach((h, i) => wRank.set(h.id, i));
+      // -------- humans (positions straight from physics) --------
       for (const h of sim.humans) {
         const v = R.humans.get(h.id); if (!v) continue;
         v.hp = h.hp / h.hpMax;
         if (v.hurtT > 0) v.hurtT -= dt; if (v.punchT > 0) v.punchT -= dt; if (v.grabT > 0) v.grabT -= dt; if (v.dodgeT > 0) v.dodgeT -= dt; if (v.riseT > 0) v.riseT -= dt;
-        v.kx *= Math.exp(-dt * 6); v.ky *= Math.exp(-dt * 6);
-
+        const p = toScreen(h.x, h.y);
+        const speed = Math.hypot(h.vx, h.vy);
+        v.x = p.x; v.y = p.y; v.z = h.z * PPM * 0.9 * depthScale(p.y);
+        const fx = Math.cos(h.face); if (!h.holding && Math.abs(fx) > 0.2) v.face = fx < 0 ? -1 : 1; else if (h.holding) v.face = v.x < g.x ? 1 : -1;
         if (h.state === 'down' && !v.down) knockout(v, null);
-
-        if (v.mode === 'thrown') {
-          // ballistic flight in world coords, z = height
-          v.x += v.vx * dt; v.y += v.vy * dt; v.vz += 700 * dt; v.z -= v.vz * dt; v.rot += v.spin * dt;
-          if (v.z <= 0) { v.z = 0; v.vx = v.vy = v.vz = 0; v.mode = v.down ? 'down' : 'lying'; v.lieT = 0; dust(v.x, v.y, 10, 90); decal(v.x, v.y + 3, 26, 8, 'rgba(60,45,30,0.35)'); snd('land'); shakeCam(4); }
-          continue;
-        }
-        if (v.mode === 'falling') { v.vz += 700 * dt; v.z = Math.max(0, v.z - v.vz * dt); v.x += v.vx * dt; v.y += v.vy * dt; if (v.z <= 0) { v.mode = 'down'; v.vx = v.vy = 0; dust(v.x, v.y, 8, 70); } continue; }
-        if (v.down) { v.mode = 'down'; continue; }
-        if (v.mode === 'lying') { v.lieT += dt; if (h.stun <= 0 && v.lieT > 0.4) { v.mode = 'rising'; v.riseT = 0.5; } continue; }
-        if (v.mode === 'rising') { if (v.riseT <= 0) v.mode = 'walk'; continue; }
-
-        // where should this body be?
-        let target = null, arriveMode = 'stance';
-        if (h.state === 'waiting') { releaseSlot(v); releaseAttach(v); const p = reservePos(wRank.get(h.id), waiting.length); target = p; arriveMode = h.stam < 60 ? 'tired' : 'idle'; }
-        else if (h.state === 'latched' && !g.dead) { if (v.attach < 0) assignAttach(v); releaseSlot(v); v.mode = 'latched'; const p = attachPos(v.attach); v.x = lerp(v.x, p.x, 1 - Math.exp(-dt * 16)); v.y = lerp(v.y, p.y, 1 - Math.exp(-dt * 16)); v.wasLatched = true; v.face = p.x < g.x ? 1 : -1; continue; }
-        else { // engaged (or dismounting a beaten gorilla)
-          if (v.attach >= 0) { const p = attachPos(v.attach); v.x = p.x + (p.z < 0 ? -g.face : g.face) * 30; v.y = p.y + 50; releaseAttach(v); if (!g.dead) v.hurtT = Math.max(v.hurtT, 0.4); dust(v.x, v.y, 5, 50); }
-          assignSlot(v);
-          const p = v.slot >= 0 ? slotPos(v.slot) : reservePos(0, 1);
-          target = p; arriveMode = h.stam < 25 ? 'tired' : 'stance';
-        }
-        // move toward target
-        const dx = target.x - v.x, dy = target.y - v.y, d = Math.hypot(dx, dy);
-        const spd = (120 + 110 * f.speed) * (h.stam < 25 ? 0.6 : 1);
-        if (d > 4) {
-          const step = Math.min(d, spd * dt);
-          v.x += dx / d * step; v.y += dy / d * step;
-          v.face = dx < 0 ? -1 : 1;
-          v.mode = 'walk'; v.walkPhase += dt * (6 + 4 * f.speed);
-          if (Math.random() < dt * 4) dust(v.x, v.y, 1, 20);
-        } else {
-          v.mode = arriveMode; v.face = v.x < g.x ? 1 : -1;
-          if (h.state === 'waiting') v.face = v.x < g.x ? 1 : -1;
-        }
-        if (v.dodgeT > 0) { const side = (v.y < g.y ? -1 : 1); v.dx = lerp(v.dx, side * 26 * Math.sin(Math.PI * clamp(v.dodgeT / 0.4, 0, 1)), 0.5); } else v.dx = lerp(v.dx, 0, kf);
+        if (h.airborne) { v.rot += (v.spin || 4) * dt; v.wasAir = true; }
+        else if (v.wasAir) { v.wasAir = false; v.rot = 0; }
+        if (h.floored && !v.wasFloored) { v.wasFloored = true; }
+        if (!h.floored && v.wasFloored && h.state !== 'down') { v.wasFloored = false; v.riseT = 0.45; }
+        if (h.act === 6 && !h.holding && Math.hypot(h.x - mg.x, h.y - mg.y) < mg.r + h.r + 0.5) v.grabT = Math.max(v.grabT, 0.15);
+        if (h.windup >= 0) v.punchT = Math.max(v.punchT, 0.2);
+        // mode
+        if (h.state === 'down') v.mode = 'down';
+        else if (h.airborne) v.mode = 'thrown';
+        else if (h.floored) v.mode = 'lying';
+        else if (v.riseT > 0) v.mode = 'rising';
+        else if (h.holding) v.mode = 'latched';
+        else if (speed > 0.6) { v.mode = 'walk'; v.walkPhase += dt * (5 + speed * 1.6); if (Math.random() < dt * speed * 0.8) dust(v.x, v.y, 1, 20); }
+        else if (h.stam < 25) v.mode = 'tired';
+        else if (h.state === 'waiting' || h.act === 7) v.mode = 'idle';
+        else v.mode = 'stance';
       }
 
       // -------- particles & texts (sim time) --------
@@ -313,7 +249,7 @@
       // -------- camera (real time) --------
       const cam = R.cam;
       if (R.cine > 0) { R.cine -= dtReal; if (R.cine <= 0) { R.timeScale = 1; cam.tz = 1; cam.tcx = 500; cam.tcy = 330; } }
-      else { cam.tz = mg.pinned ? 1.1 : 1; cam.tcx = mg.pinned ? lerp(500, g.x, 0.6) : 500; cam.tcy = mg.pinned ? lerp(330, g.y - 60, 0.6) : 330; }
+      else { cam.tz = mg.pinned ? 1.1 : 1; cam.tcx = lerp(500, g.x, mg.pinned ? 0.6 : 0.25); cam.tcy = lerp(330, g.y - 60, mg.pinned ? 0.6 : 0.2); }
       const ck = 1 - Math.exp(-dtReal * 3);
       cam.zoom = lerp(cam.zoom, cam.tz, ck); cam.cx = lerp(cam.cx, cam.tcx, ck); cam.cy = lerp(cam.cy, cam.tcy, ck);
       cam.shake *= Math.exp(-dtReal * 7);
@@ -332,7 +268,7 @@
       const g = R.gor;
       // depth-sorted drawables
       const items = [];
-      for (const h of sim.humans) { const v = R.humans.get(h.id); if (!v) continue; let key = v.y; if (v.attach >= 0 && v.mode === 'latched') { const p = ATTACH[v.attach]; key = g.y + (p.z < 0 ? -2 : 2); } else if (v.mode === 'down' || v.mode === 'lying') key -= 6; items.push({ key, v, h }); }
+      for (const h of sim.humans) { const v = R.humans.get(h.id); if (!v) continue; let key = v.y; if (v.mode === 'down' || v.mode === 'lying') key -= 6; items.push({ key, v, h }); }
       items.push({ key: g.y, gor: true });
       items.sort((a, b) => a.key - b.key);
       for (const it of items) { if (it.gor) drawGorilla(c, g, sim.g); else drawHuman(c, it.v, it.h); }
@@ -413,12 +349,12 @@
       else if (v.mode === 'idle') bob = Math.sin(R.simClock * 2 + v.seed * 6) * 1.2;
       else if (v.celebrate) bob = Math.abs(Math.sin(R.simClock * 10 + v.seed * 6)) * 9;
       else if (v.mode === 'latched') legSwing = Math.sin(R.simClock * 12 + v.seed * 6) * 16;
-      const x0 = v.x + v.kx + v.dx, groundY = v.y + v.ky;
+      const x0 = v.x, groundY = v.y;
       const inAir = v.z > 0.5;
       // shadow
       ellipse(c, x0, groundY, hh * 0.2 * (inAir ? 0.6 : 1) * (p.rot > 45 ? 1.8 : 1), hh * 0.06 * (inAir ? 0.6 : 1), `rgba(0,0,0,${inAir ? 0.22 : 0.38})`);
       const hipH = hh * (0.52 - 0.17 * p.crouch);
-      const pivotY = groundY - v.z * s - hipH * (1 - p.yoff * 0.86) - bob;
+      const pivotY = groundY - v.z - hipH * (1 - p.yoff * 0.86) - bob;
       c.save(); c.translate(x0, pivotY); c.scale(v.face, 1); c.rotate(rad(p.rot) + (v.mode === 'thrown' ? v.rot : 0));
       const dim = v.down ? 0.72 : 1;
       const skin = v.down ? shade(SKIN, dim) : SKIN, shirt = v.down ? shade(SHIRT, dim) : SHIRT, shorts = v.down ? shade(SHORTS, dim) : SHORTS;
@@ -460,7 +396,8 @@
 
     // ---- gorilla ----
     function drawGorilla(c, g, mg) {
-      const S = depthScale(GY) * GSCALE, x0 = g.x + g.lungeDir * g.lunge, y0 = g.y;
+      const S = depthScale(g.y) * GSCALE, x0 = g.x + g.lungeDir * g.lunge, y0 = g.y;
+      const wp = Math.sin(g.walkPhase) * 14 * g.moving;
       const rise = g.rise, prone = g.prone, low = g.low;
       // shadow
       ellipse(c, x0, y0 + 4, lerp(112, 150, prone) * S, lerp(30, 34, prone) * S, 'rgba(0,0,0,0.42)');
@@ -475,9 +412,9 @@
       shX += Math.sin(rad(g.lean)) * 20; shY += Math.abs(Math.sin(rad(g.lean))) * 4;
       // legs (behind)
       const legW = 30, footY = 0;
-      capsule(c, hipX - 26, hipY + 10, lerp(-38, -70, prone) , lerp(footY, -6, prone), legW, FUR_D);
-      capsule(c, hipX + 22, hipY + 10, lerp(30, -40, prone), lerp(footY, -2, prone), legW, FUR_D);
-      ellipse(c, lerp(-40, -74, prone), lerp(2, -4, prone), 22, 9, FUR_D); ellipse(c, lerp(32, -44, prone), lerp(2, -1, prone), 22, 9, FUR_D);
+      capsule(c, hipX - 26, hipY + 10, lerp(-38 + wp, -70, prone) , lerp(footY, -6, prone), legW, FUR_D);
+      capsule(c, hipX + 22, hipY + 10, lerp(30 - wp, -40, prone), lerp(footY, -2, prone), legW, FUR_D);
+      ellipse(c, lerp(-40 + wp, -74, prone), lerp(2, -4, prone), 22, 9, FUR_D); ellipse(c, lerp(32 - wp, -44, prone), lerp(2, -1, prone), 22, 9, FUR_D);
       // far arm
       const armW = 34;
       const arm = (sx, sy, a, bend, Lu, Ll, w, col, hand) => { const d1 = { x: Math.sin(rad(a)), y: Math.cos(rad(a)) }; const ex = sx + d1.x * Lu, ey = sy + d1.y * Lu; const d2 = { x: Math.sin(rad(a + bend)), y: Math.cos(rad(a + bend)) }; const hx = ex + d2.x * Ll, hy = ey + d2.y * Ll; capsule(c, sx, sy, ex, ey, w, col); capsule(c, ex, ey, hx, hy, w * 0.86, col); if (hand) ellipse(c, hx, hy, w * 0.62, w * 0.5, FUR_D); return { x: hx, y: hy }; };
@@ -523,5 +460,5 @@
     return R;
   }
 
-  root.GorillaRenderer = { create: createRenderer, W, H };
+  root.GorillaRenderer = { create: createRenderer, W, H, toScreen };
 })(window);

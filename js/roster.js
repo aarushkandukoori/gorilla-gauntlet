@@ -17,8 +17,8 @@
     strengthIndex: 815,   // kgf-equivalent; the oft-cited ~815 kg lift estimate (uncertain — 4–9× an adult man)
     sprintKmh: 40,        // short bursts
     biteForcePsi: 1300,
-    hp: 1400,
-    strikeResist: 0.88,    // share of blunt human strike damage negated (dense bone, thick hide, muscle)
+    hp: 1600,
+    strikeResist: 0.93,   // share of blunt human strike damage negated (dense bone, thick hide, heavy musculature)    // share of blunt human strike damage negated (dense bone, thick hide, muscle)
     facts: [
       'Adult male mass 136–195 kg (typical ~170 kg)',
       'Arm span 2.3–2.6 m; standing height ~1.7 m',

@@ -108,11 +108,12 @@
             <button id="n-plus" class="btn btn-small">+</button>
           </span>
         </label>
-        <label class="inline">Plan
-          <select id="strategy" title="How the humans fight">
-            <option value="swarm" selected>Swarm &amp; pin</option>
-            <option value="mixed">Mixed</option>
-            <option value="strike">Strike only</option>
+        <label class="inline">Brains
+          <select id="brain" title="Who decides what everyone does">
+            <option value="rl" selected>RL-trained neural</option>
+            <option value="swarm">Scripted: swarm &amp; pin</option>
+            <option value="mixed">Scripted: mixed</option>
+            <option value="strike">Scripted: strike only</option>
           </select>
         </label>
       </div>
@@ -122,12 +123,30 @@
       </div>
     </div>
 
+    <p class="brain-note" id="brain-note"></p>
+
     <div class="result-card" id="result-card" hidden></div>
+
+    <section class="train-panel" id="train-panel">
+      <div class="train-head">
+        <h2>Train the brains live</h2>
+        <div class="actions">
+          <button class="btn btn-small" id="train-start">▶ Train</button>
+          <button class="btn btn-small" id="train-stop" disabled>■ Stop</button>
+          <button class="btn btn-small btn-primary" id="train-use" disabled>Use these brains</button>
+          <button class="btn btn-small" id="train-reset">Shipped brains</button>
+        </div>
+      </div>
+      <p class="hint">Runs the same evolution-strategies self-play trainer in a background thread: green = human policy fitness, amber = gorilla. Each generation plays dozens of silent fights across the roster. Shipped weights come from a longer run of the same code.</p>
+      <div class="train-status" id="train-status">Idle.</div>
+      <canvas id="train-chart" class="train-chart" width="800" height="120"></canvas>
+    </section>
 
     <section class="explainer" id="how-it-works">
       <h2>How the model works</h2>
-      <p>Each 0.1 s tick, the gorilla and every human in contact act. The gorilla swings or bites at one target and keeps mauling it until it drops. Humans either strike or try to latch on. Latched bodies add <b>restraint</b> (grip strength plus dead weight); when restraint exceeds the gorilla's <b>effective strength</b> it is pinned and must burn energy to break free — a fresh gorilla explodes out and hurls people, an exhausted one can't.</p>
-      <p>Human strikes mostly bounce off dense bone and hide (88% of blunt damage negated), so the realistic path to victory is <b>numbers, mass, and endurance</b>: survive the fresh phase, run the gorilla out of stamina, rotate spent bodies out, then dogpile. The humans win when the gorilla is pinned and exhausted for 10 continuous seconds, or (rarely) beaten down outright. The gorilla wins when everyone is down or it is still standing after 10 minutes.</p>
+      <p>The arena is a physics world in metres and kilograms with 9.81 m/s² gravity, running at 20 Hz. Every body is a mass driven by force with drag (so everyone has a real top speed), collides with everyone else, and takes hits as <b>impulses</b> that conserve momentum: a 440 N·s swing launches a 90 kg man at ~5 m/s into a ballistic arc, but only nudges a 200 kg strongman. Landing hard hurts; heavy hits floor you. People who latch on ride the gorilla and load it with grip force and dead weight; when that exceeds its <b>effective strength</b> it is pinned and must burn energy to break free — a fresh gorilla explodes out and hurls bodies, an exhausted one can't.</p>
+      <p><b>Brains.</b> Every 0.2 s each actor picks an action — humans: sprint / advance / retreat / circle / strike / grab / rest; gorilla: advance / charge / swing / bite / shake free / retreat / rest — from a small neural network (27→32→32→8 for humans, 24→32→32→7 for the gorilla) reading a normalized observation of the fight, including the human's own physical stats so one shared policy adapts to Bruce Lee and Brian Shaw alike. The networks were trained by reinforcement learning: evolution-strategies policy search (antithetic Gaussian perturbations, rank-shaped fitness, Adam) in alternating self-play, rewarded for winning, exhausting or hurting the opponent, and penalized for casualties. You can keep training them in the panel below.</p>
+      <p>Human strikes mostly bounce off dense bone and hide (93% of blunt damage negated), so the realistic path to victory is <b>numbers, mass, and endurance</b>: survive the fresh phase, run the gorilla out of stamina, rest and rotate, then dogpile. The humans win when the gorilla is pinned and exhausted for 10 continuous seconds, or (rarely) beaten down outright. The gorilla wins when everyone is down or it is still standing after three minutes.</p>
       <p>What you see is what the model computes: every swing, bite, latch, throw and knockout in the arena is an event from the simulation, not a canned animation. Slow-motion kicks in for the finish.</p>
       <p>Figure numbers are public (height, weight, documented lifts, fight records). The 0–1 fight profile is an editorial estimate you can edit. The gorilla's strength figure is the widely quoted ~815 kg estimate, which is uncertain — treat every result as a model output, not a fact. <b>Solve it</b> runs many silent fights per crew size and reports the smallest crew that wins at least half the time, and the smallest that wins 9 in 10.</p>
     </section>
@@ -162,8 +181,10 @@
 </footer>
 
 <script src="js/ads.js"></script>
-<script src="js/model.js"></script>
+<script src="js/env.js"></script>
 <script src="js/roster.js"></script>
+<script src="js/policy.js"></script>
+<script src="js/brains.js"></script>
 <script src="js/wikidata.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/render.js"></script>

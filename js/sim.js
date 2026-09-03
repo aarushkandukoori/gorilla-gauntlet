@@ -1,7 +1,15 @@
 /* sim.js — arena renderer + UI controller for Gorilla Gauntlet. */
 (function () {
   'use strict';
-  const M = window.GorillaModel, R = window.GorillaRoster, WD = window.Wikidata;
+  const M = window.GorillaEnv, R = window.GorillaRoster, WD = window.Wikidata, PL = window.GorillaPolicy;
+  // ---- brains: RL-trained weights (js/brains.js) with scripted fallbacks ----
+  const heuristics = { human: M.heuristicHuman('swarm'), gorilla: M.heuristicGorilla() };
+  let shipped = window.GORILLA_BRAINS && window.GORILLA_BRAINS.human ? window.GORILLA_BRAINS : null;
+  let rlBrains = shipped ? PL.brainsFromParams(shipped.human, shipped.gorilla, heuristics) : null;
+  function brainsFor(kind) {
+    if (kind === 'rl') return rlBrains; // null → env falls back to heuristics
+    return { human: M.heuristicHuman(kind), gorilla: M.heuristicGorilla() };
+  }
   const $ = (s, el) => (el || document).querySelector(s);
   const G = R.GORILLA;
 
@@ -10,7 +18,7 @@
   const TAU = Math.PI * 2;
 
   const state = {
-    figure: null, n: 1, sim: null, playing: false, speed: 1, autoEscalate: true, strategy: 'swarm',
+    figure: null, n: 1, sim: null, playing: false, speed: 1, autoEscalate: true, strategy: 'swarm', brain: 'rl',
     lastEvent: 0, acc: 0, lastTs: 0,
     pendingEscalate: false, escalateTimer: 0, rounds: [], roundNo: 0, solving: false, customFigures: new Map(),
   };
@@ -23,7 +31,8 @@
     barGhp: $('#bar-ghp'), valGhp: $('#val-ghp'), barGstam: $('#bar-gstam'), valGstam: $('#val-gstam'), barPin: $('#bar-pin'), valPin: $('#val-pin'),
     valRestraint: $('#val-restraint'), valStanding: $('#val-standing'), valAttacks: $('#val-attacks'),
     wdQuery: $('#wd-query'), wdGo: $('#wd-go'), wdResults: $('#wd-results'), wdHint: $('#wd-hint'), customForm: $('#custom-form'), customDetails: $('#custom-details'),
-    sound: $('#btn-sound'),
+    sound: $('#btn-sound'), brainSel: $('#brain'), brainNote: $('#brain-note'),
+    trainStart: $('#train-start'), trainStop: $('#train-stop'), trainUse: $('#train-use'), trainReset: $('#train-reset'), trainStatus: $('#train-status'), trainChart: $('#train-chart'),
   };
   const renderer = window.GorillaRenderer.create(el.canvas);
 
@@ -181,7 +190,7 @@
   function startRun(n, opts) {
     opts = opts || {};
     setN(n);
-    state.sim = M.createSim(state.figure, state.n, G, { strategy: state.strategy });
+    state.sim = M.createSim(state.figure, state.n, G, { strategy: state.strategy, brains: brainsFor(state.brain) });
     state.lastEvent = 0; state.acc = 0; state.pendingEscalate = false;
     state.roundNo++;
     renderer.reset(state.sim, state.figure);
@@ -260,7 +269,7 @@
     setPlaying(false);
     const f = state.figure;
     const trials = 60;
-    const s = M.solver(f, G, { strategy: state.strategy }, { trials, maxN: 150, target: 0.9 });
+    const s = M.solver(f, G, { strategy: state.strategy, brains: brainsFor(state.brain) }, { trials, maxN: 150, target: 0.9 });
     el.result.hidden = false; el.result.className = 'result-card';
     el.result.innerHTML = `<h3>Solving: how many ${escapeHtml(plural(2, f.name))}?</h3><div class="solve-progress" id="solve-progress">Warming up…</div><canvas class="solve-chart" id="solve-chart" width="800" height="140"></canvas><div class="solve-summary" id="solve-summary"></div><div class="actions" id="solve-actions"></div>`;
     const prog = $('#solve-progress', el.result), chart = $('#solve-chart', el.result);
@@ -278,7 +287,7 @@
     const f = state.figure, sum = s.summary();
     const prog = $('#solve-progress', el.result);
     const n50 = sum.n50, n90 = sum.n90;
-    prog.textContent = `${s.rows.length} crew sizes × ${s.cfg.trials} fights each, plan: ${el.strategy.options[el.strategy.selectedIndex].text}.`;
+    prog.textContent = `${s.rows.length} crew sizes × ${s.cfg.trials} fights each · brains: ${el.brainSel.options[el.brainSel.selectedIndex].text}.`;
     $('#solve-summary', el.result).innerHTML = `
       <div><span>Wins ≥ 50%</span><b>${n50 == null ? '150+' : n50}</b> ${escapeHtml(plural(n50 || 2, f.name))}</div>
       <div><span>Wins ≥ 90%</span><b>${n90 == null ? '150+' : n90}</b> ${escapeHtml(plural(n90 || 2, f.name))}</div>
@@ -378,7 +387,13 @@
   el.nInput.addEventListener('change', e => { startRun(Number(e.target.value), { autoplay: state.playing }); });
   el.nMinus.addEventListener('click', () => startRun(state.n - 1, { autoplay: state.playing }));
   el.nPlus.addEventListener('click', () => startRun(state.n + 1, { autoplay: state.playing }));
-  el.strategy.addEventListener('change', e => { state.strategy = e.target.value; startRun(state.n, { autoplay: state.playing }); });
+  el.brainSel.addEventListener('change', e => { state.brain = e.target.value; state.strategy = e.target.value === 'rl' ? 'swarm' : e.target.value; syncBrainNote(); startRun(state.n, { autoplay: state.playing }); });
+  function syncBrainNote() {
+    if (state.brain !== 'rl') { el.brainNote.textContent = 'Hand-written policies: no learning.'; return; }
+    if (!rlBrains) { el.brainNote.textContent = 'No trained weights found — using scripted fallback.'; return; }
+    const m = (window.GORILLA_BRAINS && window.GORILLA_BRAINS.meta) || {};
+    el.brainNote.textContent = `Neural policies (${PL.HUMAN_NET.join('×')} / ${PL.GORILLA_NET.join('×')}) trained ${m.generations || '?'} generations of self-play${state.trainedLive ? ' + ' + state.trainedLive + ' live' : ''}.`;
+  }
   el.auto.addEventListener('change', e => state.autoEscalate = e.target.checked);
   el.solve.addEventListener('click', solve);
   el.select.addEventListener('change', e => setFigure(figureById(e.target.value)));
@@ -391,9 +406,50 @@
 
   // ---------- boot ----------
   populateSelect(); fillArchetypes(); renderGorillaFacts(); syncSliderLabels(); resizeCanvas();
+  // ---------- live training (Web Worker) ----------
+  let worker = null, trainHist = [], liveParams = null;
+  function drawTrainChart() {
+    const c = el.trainChart, x = c.getContext('2d'), w = c.width, h = c.height; x.clearRect(0, 0, w, h);
+    if (trainHist.length < 2) return;
+    const pad = 26, xs = i => pad + (w - pad - 6) * i / (trainHist.length - 1);
+    const ys = v => h - 14 - (h - 24) * clamp01((v + 1.5) / 3);
+    x.strokeStyle = '#2a313b'; x.beginPath(); x.moveTo(pad, ys(0)); x.lineTo(w - 6, ys(0)); x.stroke();
+    x.fillStyle = '#9aa3b2'; x.font = '10px system-ui'; x.fillText('0', 8, ys(0) + 3); x.fillText('+1', 4, ys(1) + 3); x.fillText('-1', 4, ys(-1) + 3);
+    for (const side of ['human', 'gorilla']) {
+      x.strokeStyle = side === 'human' ? '#2fbf85' : '#f59e0b'; x.lineWidth = 2; x.beginPath(); let started = false;
+      trainHist.forEach((r, i) => { if (r.side !== side) return; const px = xs(i), py = ys(r.current); if (!started) { x.moveTo(px, py); started = true; } else x.lineTo(px, py); });
+      x.stroke();
+    }
+  }
+  function clamp01(v) { return Math.max(0, Math.min(1, v)); }
+  function setTrainUI(running) { el.trainStart.disabled = running; el.trainStop.disabled = !running; el.trainUse.disabled = !liveParams; }
+  el.trainStart.addEventListener('click', () => {
+    if (worker) return;
+    try { worker = new Worker('js/trainer-worker.js'); } catch (e) { el.trainStatus.textContent = 'Workers unavailable here (open the site over http).'; return; }
+    trainHist = []; liveParams = null;
+    worker.onmessage = e => {
+      const m = e.data;
+      if (m.type === 'gen') { trainHist.push(m.stats); el.trainStatus.textContent = `Generation ${m.stats.gen + 1} · training the ${m.stats.side}s · fitness ${m.stats.current.toFixed(2)} · humans win ${(m.stats.humanWinRate * 100).toFixed(0)}% of test fights`; drawTrainChart(); }
+      else if (m.type === 'params') { liveParams = m; setTrainUI(true); }
+      else if (m.type === 'error') { el.trainStatus.textContent = 'Trainer error: ' + m.message; }
+    };
+    worker.postMessage({ type: 'start', init: shipped ? { human: shipped.human, gorilla: shipped.gorilla } : null, cfg: { popSize: 10, episodes: 2, nRange: [3, 10], timeLimit: 60, phaseLen: 4 } });
+    el.trainStatus.textContent = 'Spinning up…'; setTrainUI(true);
+  });
+  el.trainStop.addEventListener('click', () => { if (worker) { worker.postMessage({ type: 'stop' }); worker.terminate(); worker = null; } setTrainUI(false); el.trainStatus.textContent += ' · stopped'; });
+  el.trainUse.addEventListener('click', () => {
+    if (!liveParams) return;
+    rlBrains = PL.brainsFromParams(liveParams.human, liveParams.gorilla, heuristics);
+    state.trainedLive = liveParams.gen; state.brain = 'rl'; el.brainSel.value = 'rl'; syncBrainNote();
+    el.trainStatus.textContent = `Using brains from live generation ${liveParams.gen}.`;
+    startRun(state.n, { autoplay: state.playing });
+  });
+  el.trainReset.addEventListener('click', () => { rlBrains = shipped ? PL.brainsFromParams(shipped.human, shipped.gorilla, heuristics) : null; state.trainedLive = 0; syncBrainNote(); el.trainStatus.textContent = 'Back to the shipped brains.'; startRun(state.n, { autoplay: state.playing }); });
+  setTrainUI(false);
+
   const params = new URLSearchParams(location.search);
   const startFigure = R.byId(params.get('figure')) || R.byId('ronnie-coleman') || R.FIGURES[0];
-  state.strategy = el.strategy.value; state.speed = Number(el.speed.value); state.autoEscalate = el.auto.checked;
+  state.brain = el.brainSel.value; state.strategy = state.brain === 'rl' ? 'swarm' : state.brain; state.speed = Number(el.speed.value); state.autoEscalate = el.auto.checked; syncBrainNote();
   setFigure(startFigure, { keepN: false });
   if (params.get('n')) startRun(Number(params.get('n')));
   requestAnimationFrame(frame);
